@@ -5,7 +5,7 @@ import Foundation
 
 /// The case names are the config file's [keys] names.
 public enum Action: Int, CaseIterable, Sendable {
-    case note, speak, paste, open, stack1, stack2, stack3, stack4
+    case note, speak, paste, open, clear, stack1, stack2, stack3, stack4
 
     public var name: String { "\(self)" }
 }
@@ -34,6 +34,7 @@ public struct Config: Equatable, Sendable {
         Shortcut(code: 14, mods: modCmd),            // speak  ⌘E
         Shortcut(code: 9, mods: modCtrl | modCmd),   // paste  ⌃⌘V
         Shortcut(code: 1, mods: modCtrl | modCmd),   // open   ⌃⌘S
+        Shortcut(code: 51, mods: modCtrl | modCmd),  // clear  ⌃⌘⌫
         Shortcut(code: 4, mods: modOpt),             // ⌥H
         Shortcut(code: 38, mods: modOpt),            // ⌥J
         Shortcut(code: 40, mods: modOpt),            // ⌥K
@@ -63,6 +64,7 @@ note   = "cmd+g"        # type a note about the selection
 speak  = "cmd+e"        # speak a note; see [voice]
 paste  = "ctrl+cmd+v"   # paste the current stack as Markdown, then clear it
 open   = "ctrl+cmd+s"   # open the current stack as a Markdown file
+clear  = "ctrl+cmd+delete"   # empty the current stack without pasting
 stack1 = "opt+h"        # switch stacks
 stack2 = "opt+j"
 stack3 = "opt+k"

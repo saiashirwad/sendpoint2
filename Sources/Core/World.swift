@@ -82,6 +82,7 @@ public enum Event: Equatable, Sendable {
     case select(Int)
     case paste
     case open
+    case clear
     case configure(Config)
     case voice(Voice)
     case readoutElapsed(Int)
@@ -181,6 +182,10 @@ private func decide(_ w: inout World, _ event: Event) -> [Effect] {
         let markdown = compose(w.stacks[w.active])
         w.stacks[w.active] = []
         return [.paste(markdown), .save]
+
+    case (.idle, .clear) where !w.stacks[w.active].isEmpty:
+        w.stacks[w.active] = []
+        return [.save]
 
     case (.idle, .open):
         return [.open(w.active)]

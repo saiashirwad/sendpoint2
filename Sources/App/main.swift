@@ -132,6 +132,7 @@ func onKey(_ action: Action, down: Bool) {
         send(.speakUp)
     case (.paste, true): send(.paste)
     case (.open, true): send(.open)
+    case (.clear, true): send(.clear)
     case (_, true) where action.rawValue >= Action.stack1.rawValue:
         send(.select(action.rawValue - Action.stack1.rawValue))
     default: break

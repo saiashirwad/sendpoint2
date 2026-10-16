@@ -294,3 +294,15 @@ private func tapMode() -> World {
     #expect(fx == [.saveStore])
     #expect(run([.edited(stack: 0, w.stacks[0])], from: w).1.isEmpty)   // the app's own file: nothing to do
 }
+
+@Test func clearEmptiesTheCurrentStackWithoutPasting() {
+    var start = World()
+    start.stacks[0] = [Note(quote: "a", body: "one")]
+    start.stacks[1] = [Note(quote: "b", body: "two")]
+    let (w, fx) = run([.clear], from: start)
+    #expect(fx == [.save])
+    #expect(w.stacks[0].isEmpty)
+    #expect(w.stacks[1].count == 1)
+    #expect(run([.clear]).1.isEmpty)
+    #expect(run([.capture(selection: "x"), .clear], from: start).0.stacks[0].count == 1)
+}
