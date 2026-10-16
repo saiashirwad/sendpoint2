@@ -4,13 +4,13 @@ import Carbon.HIToolbox
 
 /// Reading the frontmost app's selection, and pasting into it.
 enum Selection {
-    /// Synchronous on purpose: Accessibility answers in a few milliseconds. Only when it
-    /// can't say does this fall back to ⌘C, blocking for at most `copyTimeout`.
-    static func read(copyTimeout: TimeInterval) -> String {
+    /// What Accessibility says about the selection, in a few milliseconds.
+    /// `nil` means it can't say; the caller then starts `copyViaKeystroke`.
+    static func read() -> String? {
         switch accessibilityText() {
         case .text(let text): return text
         case .none: return ""
-        case .unknown: return copyViaKeystroke(timeout: copyTimeout) ?? ""
+        case .unknown: return nil
         }
     }
 
@@ -54,7 +54,9 @@ enum Selection {
 
     // MARK: Keystrokes
 
-    private static func copyViaKeystroke(timeout: TimeInterval) -> String? {
+    /// Posts ⌘C and returns at once. `deliver` gets the copied text, if any shows up within `timeout`,
+    /// and the pasteboard is put back as it was. Call before the card takes focus, so the keystroke reaches the app.
+    static func copyViaKeystroke(timeout: TimeInterval, deliver: @escaping (String) -> Void) {
         let pb = NSPasteboard.general
         let saved = (pb.pasteboardItems ?? []).map { item in
             item.types.compactMap { type in item.data(forType: type).map { (type, $0) } }
@@ -62,16 +64,21 @@ enum Selection {
         let before = pb.changeCount
         postCommand(kVK_ANSI_C)
         let deadline = Date(timeIntervalSinceNow: timeout)
-        while pb.changeCount == before, Date() < deadline { usleep(5_000) }
-        guard pb.changeCount != before else { return nil }
-        let copied = pb.string(forType: .string)
-        pb.clearContents()
-        pb.writeObjects(saved.map { pairs in
-            let item = NSPasteboardItem()
-            for (type, data) in pairs { item.setData(data, forType: type) }
-            return item
-        })
-        return copied
+        func poll() {
+            if pb.changeCount == before {
+                if Date() < deadline { DispatchQueue.main.asyncAfter(deadline: .now() + 0.005, execute: poll) }
+                return
+            }
+            let copied = pb.string(forType: .string)
+            pb.clearContents()
+            pb.writeObjects(saved.map { pairs in
+                let item = NSPasteboardItem()
+                for (type, data) in pairs { item.setData(data, forType: type) }
+                return item
+            })
+            if let copied { deliver(copied) }
+        }
+        poll()
     }
 
     /// ⌃, ⌥ or ⇧ still down. ⌘ is fine: every posted keystroke is a ⌘ chord anyway.

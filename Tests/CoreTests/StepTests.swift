@@ -29,6 +29,13 @@ private func run(_ events: [Event], from start: World = ready()) -> (World, [Eff
     #expect(w.stacks[3] == [Note(quote: "q", body: "b")])
 }
 
+@Test func lateSelectionFillsAnEmptyQuoteButNeverReplacesOne() {
+    let (w, _) = run([.capture(selection: ""), .edit("b"), .quoted("late"), .quoted("later"), .commit])
+    #expect(w.stacks[0] == [Note(quote: "late", body: "b")])
+    let (idle, _) = run([.quoted("stray")])
+    #expect(idle.mode == .idle)
+}
+
 @Test func emptyNoteIsDropped() {
     let (w, fx) = run([.capture(selection: "  "), .edit("\n"), .commit])
     #expect(w.stacks.joined().isEmpty)

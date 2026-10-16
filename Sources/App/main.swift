@@ -127,9 +127,13 @@ func onKey(_ action: Action, down: Bool) {
     let idle = world.mode == .idle
     switch (action, down) {
     case (.note, true):
-        send(.capture(selection: idle ? Selection.read(copyTimeout: 0.1) : ""))
+        let selection = idle ? Selection.read() : ""
+        if selection == nil { Selection.copyViaKeystroke(timeout: 0.3) { send(.quoted($0)) } }   // before the card takes focus
+        send(.capture(selection: selection ?? ""))
     case (.speak, true):
-        send(.speakDown(selection: idle ? Selection.read(copyTimeout: 0.15) : ""))
+        let selection = idle ? Selection.read() : ""
+        if selection == nil { Selection.copyViaKeystroke(timeout: 0.3) { send(.quoted($0)) } }   // before the card takes focus
+        send(.speakDown(selection: selection ?? ""))
     case (.speak, false):
         send(.speakUp)
     case (.paste, true): send(.paste)

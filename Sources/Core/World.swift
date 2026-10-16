@@ -73,6 +73,8 @@ public struct World: Equatable, Sendable {
 public enum Event: Equatable, Sendable {
     case capture(selection: String)
     case speakDown(selection: String)
+    /// A selection the ⌘C fallback fetched after the card was already up. Fills an empty quote only.
+    case quoted(String)
     case speakUp
     case partial(take: Int, String)
     case final(take: Int, String)
@@ -140,6 +142,15 @@ private func decide(_ w: inout World, _ event: Event) -> [Effect] {
         // Nothing heard: leave the card open to type into rather than saving a bare quote.
         guard save, !trimmed(text).isEmpty else { return [] }
         return step(&w, .commit)
+
+    case (.drafting(var draft), .quoted(let text)) where draft.quote.isEmpty:
+        draft.quote = text
+        w.mode = .drafting(draft)
+        return []
+    case (.listening(var draft, let partial, let save), .quoted(let text)) where draft.quote.isEmpty:
+        draft.quote = text
+        w.mode = .listening(draft, partial: partial, save: save)
+        return []
 
     case (.drafting(var draft), .edit(let text)):
         draft.body = text
