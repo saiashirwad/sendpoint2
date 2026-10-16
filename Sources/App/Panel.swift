@@ -247,7 +247,7 @@ final class Panel: NSPanel, NSTextViewDelegate {
     }
 
     @objc private func tick() {
-        let target = CGFloat(speech.meter.level)
+        let target = CGFloat(speech?.meter.level ?? 0)
         loudness += (target - loudness) * (target > loudness ? 0.5 : 0.15)   // fast attack, slow release
         drawOrb()
     }

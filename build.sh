@@ -28,4 +28,5 @@ TIMESTAMP=--timestamp=none
 [[ "${IDENTITY:-}" == "Developer ID Application"* ]] && TIMESTAMP=--timestamp
 codesign --force --options runtime "$TIMESTAMP" \
     --entitlements Resources/Sendpoint.entitlements --sign "${IDENTITY:--}" "$APP"
+scripts/check-app.sh "$APP"
 echo "Built $APP (signed: ${IDENTITY:-ad-hoc})"

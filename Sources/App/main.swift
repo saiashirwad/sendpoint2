@@ -3,8 +3,9 @@ import Core
 
 // The whole app loop: Event → step → render → effects.
 
-let dataDir = URL.applicationSupportDirectory.appending(path: "Sendpoint")
-let configURL = URL(filePath: ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"] ?? NSHomeDirectory() + "/.config")
+let smoke = IntegrationSmoke.fromArguments()
+let dataDir = smoke?.root.appending(path: "notes") ?? URL.applicationSupportDirectory.appending(path: "Sendpoint")
+let configURL = smoke?.root.appending(path: "config.toml") ?? URL(filePath: ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"] ?? NSHomeDirectory() + "/.config")
     .appending(path: "sendpoint/config.toml")
 /// What the app last wrote to, or read from, each stack file. Disk queue only.
 nonisolated(unsafe) var stackFiles = [Data?](repeating: nil, count: stackCount)
@@ -18,16 +19,18 @@ func send(_ event: Event) {
 }
 
 func render() {
-    panel.render(world)
-    readout.render(world)
-    menu.render(world)
+    if let smoke { smoke.renders += 1; return }
+    panel?.render(world)
+    readout?.render(world)
+    menu?.render(world)
 }
 
 func perform(_ effect: Effect) {
+    if let smoke, smoke.perform(effect) { return }
     switch effect {
-    case .micStart(let take): speech.start(take: take)
-    case .micStop(let take): speech.stop(take: take)
-    case .micCancel: speech.cancel()
+    case .micStart(let take): speech?.start(take: take)
+    case .micStop(let take): speech?.stop(take: take)
+    case .micCancel: speech?.cancel()
     case .paste(let markdown): Selection.paste(markdown)
     case .save: save()
     case .open(let i):
@@ -98,6 +101,7 @@ nonisolated func write(_ data: Data, to url: URL) {
 
 /// The file's default app, or TextEdit when nothing claims .md / .toml.
 func openFile(_ url: URL) {
+    if let smoke { smoke.opened.append(url); return }
     let app = NSWorkspace.shared.urlForApplication(toOpen: url)
         ?? URL(filePath: "/System/Applications/TextEdit.app")
     NSWorkspace.shared.open([url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
@@ -123,16 +127,27 @@ func pollConfig() {
 
 // MARK: Keys → Events
 
+func selectedText() -> String? {
+    if let smoke { return smoke.selection }
+    return Selection.read()
+}
+
 func onKey(_ action: Action, down: Bool) {
     let idle = world.mode == .idle
     switch (action, down) {
     case (.note, true):
-        let selection = idle ? Selection.read() : ""
-        if selection == nil { Selection.copyViaKeystroke(timeout: 0.3) { send(.quoted($0)) } }   // before the card takes focus
+        let selection = idle ? selectedText() : ""
+        if selection == nil {
+            if let smoke { DispatchQueue.main.async { send(.quoted(smoke.fallbackSelection)) } }
+            else { Selection.copyViaKeystroke(timeout: 0.3) { send(.quoted($0)) } }
+        }   // before the card takes focus
         send(.capture(selection: selection ?? ""))
     case (.speak, true):
-        let selection = idle ? Selection.read() : ""
-        if selection == nil { Selection.copyViaKeystroke(timeout: 0.3) { send(.quoted($0)) } }   // before the card takes focus
+        let selection = idle ? selectedText() : ""
+        if selection == nil {
+            if let smoke { DispatchQueue.main.async { send(.quoted(smoke.fallbackSelection)) } }
+            else { Selection.copyViaKeystroke(timeout: 0.3) { send(.quoted($0)) } }
+        }   // before the card takes focus
         send(.speakDown(selection: selection ?? ""))
     case (.speak, false):
         send(.speakUp)
@@ -147,12 +162,17 @@ func onKey(_ action: Action, down: Bool) {
 
 // MARK: Launch
 
-let app = NSApplication.shared
-app.setActivationPolicy(.accessory)
-let panel = Panel()
-let readout = Readout()
-let menu = StatusMenu()
-let speech = Speech()
+let app: NSApplication? = smoke == nil ? NSApplication.shared : nil
+app?.setActivationPolicy(.accessory)
+let panel: Panel? = smoke == nil ? Panel() : nil
+let readout: Readout? = smoke == nil ? Readout() : nil
+let menu: StatusMenu? = smoke == nil ? StatusMenu() : nil
+let speech: Speech? = smoke == nil ? Speech() : nil
+if let smoke {
+    Task { await smoke.run() }
+    dispatchMain()
+}
+
 Keys.install(onKey)
 Keys.bind(world.config.keys)   // defaults; the first poll swaps in the file's keys if they differ
 pollConfig()
@@ -161,10 +181,10 @@ RunLoop.main.add(Timer(timeInterval: 1, repeats: true) { _ in
     MainActor.assumeIsolated {
         pollConfig()
         pollStacks()
-        menu.render(world)   // picks up an Accessibility grant made in System Settings
+        menu?.render(world)   // picks up an Accessibility grant made in System Settings
     }
 }, forMode: .common)
 _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
-speech.prewarm()
+speech?.prewarm()
 render()
-app.run()
+app?.run()

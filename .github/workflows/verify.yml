@@ -4,10 +4,27 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: macos-26
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - run: ./check.sh
-      - run: CODESIGN_IDENTITY=- ./build.sh
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+      - name: Build and test
+        run: ./check.sh
+      - name: Build and verify the signed app bundle
+        run: CODESIGN_IDENTITY=- ./build.sh
+      - name: Exercise the isolated app loop
+        run: scripts/smoke-app.sh
