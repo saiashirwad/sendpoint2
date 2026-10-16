@@ -1,0 +1,51 @@
+name: Release
+
+# Push a tag to ship it:  git tag v2.0.0 && git push origin v2.0.0
+# The tag is the version; Resources/Info.plist is not bumped by hand.
+# A tag with a suffix (v2.1.0-beta.1) becomes a prerelease.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # build.sh numbers builds by commit count
+
+      - run: ./check.sh
+
+      - id: package
+        run: scripts/package.sh "${GITHUB_REF_NAME#v}"
+        env:
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTARIZED: ${{ steps.package.outputs.notarized }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # The site's /download serves Sendpoint.dmg from the latest release.
+          cp "dist/Sendpoint-$version.dmg" dist/Sendpoint.dmg
+          notes=""
+          if [ "$NOTARIZED" != true ]; then
+            notes="> [!WARNING]
+          > Not notarized. Only open it if you trust this repository.
+
+          Move **Sendpoint.app** to /Applications and open it once. If macOS blocks it, open **System Settings › Privacy & Security**, click **Open Anyway**, then **Open**."
+          fi
+          prerelease=()
+          [[ "$version" == *-* ]] && prerelease=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/Sendpoint-$version.dmg" "dist/Sendpoint-$version.dmg.sha256" dist/Sendpoint.dmg \
+            --title "Sendpoint $version" --generate-notes --notes "$notes" "${prerelease[@]}"

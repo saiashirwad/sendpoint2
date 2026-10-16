@@ -1,0 +1,72 @@
+name: Nightly
+
+# Every night, if main moved: a prerelease tagged `nightly` holding Sendpoint-nightly.dmg.
+# It is a prerelease, so the site's /download (the latest real release) never serves it.
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+jobs:
+  nightly:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # build.sh numbers builds by commit count
+
+      - name: Skip when main hasn't moved since the last nightly
+        id: moved
+        run: |
+          last=$(git rev-parse -q --verify "refs/tags/nightly^{commit}" || true)
+          if [ "$last" = "$(git rev-parse HEAD)" ] && [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            echo "Nightly is already $last."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.moved.outputs.build == 'true'
+        run: ./check.sh
+
+      - if: steps.moved.outputs.build == 'true'
+        id: package
+        run: |
+          version="$(date -u +%Y.%m.%d)-nightly.$(git rev-parse --short HEAD)"
+          scripts/package.sh "$version"
+          mv "dist/Sendpoint-$version.dmg" dist/Sendpoint-nightly.dmg
+          (cd dist && shasum -a 256 Sendpoint-nightly.dmg > Sendpoint-nightly.dmg.sha256)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+        env:
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+
+      - if: steps.moved.outputs.build == 'true'
+        name: Replace the nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.package.outputs.version }}
+          NOTARIZED: ${{ steps.package.outputs.notarized }}
+        run: |
+          gh release delete nightly --yes --cleanup-tag || true
+          git tag -f nightly
+          git push -f origin refs/tags/nightly
+          notes="Built from $(git rev-parse --short HEAD) on $(date -u '+%Y-%m-%d'). Version $VERSION."
+          if [ "$NOTARIZED" != true ]; then
+            notes="$notes
+
+          > [!WARNING]
+          > Not notarized. If macOS blocks it, open **System Settings › Privacy & Security** and click **Open Anyway**."
+          fi
+          gh release create nightly dist/Sendpoint-nightly.dmg dist/Sendpoint-nightly.dmg.sha256 \
+            --prerelease --title "Sendpoint nightly" --notes "$notes"
