@@ -50,7 +50,7 @@ final class Speech {
         spare = nil
         useDefaultInput()
         let (stream, input) = AsyncStream.makeStream(of: AnalyzerInput.self)
-        let mic = engine.inputNode.outputFormat(forBus: 0)
+        let mic = engine.inputNode.inputFormat(forBus: 0)   // the hardware's rate; outputFormat can still hold the previous device's
         guard let converter = AVAudioConverter(from: mic, to: format) else { return send(.final(take: take, "")) }
         let tap = Tap(converter: converter, output: format, input: input, meter: meter)
         engine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: mic) { @Sendable buffer, _ in tap.feed(buffer) }
@@ -119,6 +119,7 @@ final class Speech {
                                  &id, UInt32(MemoryLayout<AudioDeviceID>.size))
         }
         device = now
+        engine.prepare()
     }
 
     private func prepareSpare() async {
