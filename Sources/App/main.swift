@@ -127,7 +127,7 @@ func onKey(_ action: Action, down: Bool) {
     let idle = world.mode == .idle
     switch (action, down) {
     case (.note, true):
-        send(.capture(selection: idle ? Selection.read(copyTimeout: 0.3) : ""))
+        send(.capture(selection: idle ? Selection.read(copyTimeout: 0.1) : ""))
     case (.speak, true):
         send(.speakDown(selection: idle ? Selection.read(copyTimeout: 0.15) : ""))
     case (.speak, false):

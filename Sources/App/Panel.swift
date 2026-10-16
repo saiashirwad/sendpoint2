@@ -186,19 +186,13 @@ final class Panel: NSPanel, NSTextViewDelegate {
         invalidateShadow()
     }
 
-    /// Bottom-centre of the screen under the mouse, rising in.
+    /// Bottom-centre of the screen under the mouse, at once.
     private func present() {
         guard let target = bottomCentre(frame.size) else { return }
-        setFrame(target.offsetBy(dx: 0, dy: -8), display: false)
-        alphaValue = 0
+        setFrame(target, display: false)
+        alphaValue = 1
         makeKeyAndOrderFront(nil)
         makeFirstResponder(text)
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.16
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            animator().alphaValue = 1
-            animator().setFrame(target, display: true)
-        }
     }
 
     // MARK: Text
