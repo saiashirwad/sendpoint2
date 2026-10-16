@@ -2,15 +2,13 @@
 set -euo pipefail
 
 # Wipe the installed app and every first-run artifact so the next
-# ./install.sh is a cold setup: permissions, voice model, notes, settings.
+# ./install.sh is a cold setup: permissions, notes, settings.
 
 APP_NAME="Sendpoint"
 BUNDLE_ID="app.sendpoint"
 APP="/Applications/${APP_NAME}.app"
 SUPPORT="${HOME}/Library/Application Support/${APP_NAME}"
-VOICE_MODEL="${HOME}/Library/Application Support/FluidAudio/Models/parakeet-unified-en-0.6b"
-# The engine before streaming captions; gone from new installs, still on old ones.
-LEGACY_VOICE_MODEL="${HOME}/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3"
+CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/sendpoint"
 
 remove() {
     local path="$1"
@@ -30,20 +28,6 @@ delete_defaults() {
     remove "${HOME}/Library/Preferences/${domain}.plist.lockfile"
 }
 
-delete_login_item() {
-    local name="$1"
-    osascript - "$name" <<'APPLESCRIPT' 2>/dev/null || true
-on run argv
-    set itemName to item 1 of argv
-    tell application "System Events"
-        if exists login item itemName then
-            delete login item itemName
-        end if
-    end tell
-end run
-APPLESCRIPT
-}
-
 echo "==> Quitting any running copy"
 pkill -x "$APP_NAME" 2>/dev/null || true
 for _ in $(seq 1 40); do
@@ -58,24 +42,10 @@ fi
 echo "==> Removing the installed app"
 remove "$APP"
 
-echo "==> Removing notes, logs, and leftover support files"
+echo "==> Removing notes and settings"
 remove "$SUPPORT"
-# Previous product names for this app.
-remove "${HOME}/Library/Application Support/ClipboardAnnotator"
-remove "${HOME}/Library/Application Support/ClipboardAnnotatorNext"
-
-echo "==> Removing the voice model"
-remove "$VOICE_MODEL"
-remove "$LEGACY_VOICE_MODEL"
-
-echo "==> Removing settings"
+remove "$CONFIG_DIR"
 delete_defaults "$BUNDLE_ID"
-# CFBundleName domain from earlier builds.
-delete_defaults "$APP_NAME"
-
-echo "==> Removing Launch at Login"
-delete_login_item "$APP_NAME"
-delete_login_item "Clipboard Annotator"
 
 echo "==> Resetting Accessibility and Microphone"
 # Setup reads these; leaving a grant makes first-run look already finished.
@@ -84,25 +54,9 @@ tccutil reset All "$BUNDLE_ID" 2>/dev/null || {
     tccutil reset Microphone "$BUNDLE_ID" 2>/dev/null || true
 }
 
-echo "==> Removing caches and leftover recordings"
+echo "==> Removing caches"
 remove "${HOME}/Library/Caches/${BUNDLE_ID}"
 remove "${HOME}/Library/Saved Application State/${BUNDLE_ID}.savedState"
-remove "${HOME}/Library/HTTPStorages/${BUNDLE_ID}"
-remove "${HOME}/Library/WebKit/${BUNDLE_ID}"
-
-CACHE_DIR="$(getconf DARWIN_USER_CACHE_DIR 2>/dev/null || true)"
-TEMP_DIR="$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)"
-shopt -s nullglob
-if [ -n "${CACHE_DIR}" ]; then
-    for path in "${CACHE_DIR}${BUNDLE_ID}" "${CACHE_DIR}${BUNDLE_ID}."*; do
-        remove "$path"
-    done
-fi
-if [ -n "${TEMP_DIR}" ]; then
-    for path in "${TEMP_DIR}"clipboard-note-*.caf; do
-        remove "$path"
-    done
-fi
 
 echo
 echo "First-run state. Install with: ./install.sh"

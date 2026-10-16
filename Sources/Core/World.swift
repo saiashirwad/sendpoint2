@@ -96,8 +96,6 @@ public enum Effect: Equatable, Sendable {
     case micCancel
     case paste(String)
     case save
-    /// Write notes.json only: the change came from a stack file, so leave the files as the user wrote them.
-    case saveStore
     /// Write stack N's Markdown file and open it in the user's editor.
     case open(Int)
     /// Re-register the global shortcuts from `world.config.keys`.
@@ -172,7 +170,7 @@ private func decide(_ w: inout World, _ event: Event) -> [Effect] {
         return effects + [.expireReadout(w.readouts)]
     case (_, .edited(let i, let notes)) where w.stacks.indices.contains(i) && notes != w.stacks[i]:
         w.stacks[i] = notes
-        return [.saveStore]
+        return []   // the file is already what the user wrote; leave it alone
 
     case (_, .readoutElapsed(let n)) where n == w.readout:
         w.readout = nil

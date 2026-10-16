@@ -4,10 +4,12 @@ import Core
 // The whole app loop: Event → step → render → effects.
 
 let dataDir = URL.applicationSupportDirectory.appending(path: "Sendpoint")
-let storeURL = dataDir.appending(path: "notes.json")
 let configURL = URL(filePath: ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"] ?? NSHomeDirectory() + "/.config")
     .appending(path: "sendpoint/config.toml")
-var world = (try? Data(contentsOf: storeURL)).flatMap(Saved.decode) ?? World()
+/// What the app last wrote to, or read from, each stack file. Disk queue only.
+nonisolated(unsafe) var stackFiles = [Data?](repeating: nil, count: stackCount)
+
+var world = loadWorld()
 
 func send(_ event: Event) {
     let effects = step(&world, event)
@@ -28,10 +30,6 @@ func perform(_ effect: Effect) {
     case .micCancel: speech.cancel()
     case .paste(let markdown): Selection.paste(markdown)
     case .save: save()
-    case .saveStore:
-        let json = Saved.encode(world)
-        let store = storeURL
-        diskQueue.async { write(json, to: store) }
     case .open(let i):
         let url = stackURL(i)
         let doc = Data(stackDocument(name: world.config.names[i], notes: world.stacks[i]).utf8)
@@ -53,21 +51,25 @@ let diskQueue = DispatchQueue(label: "app.sendpoint.disk", qos: .utility)
 
 func stackURL(_ i: Int) -> URL { dataDir.appending(path: "stack-\(i + 1).md") }
 
-/// notes.json is the truth; the stack-N.md files mirror it so an open editor stays current,
-/// and edits saved to them come back through `pollStacks`.
+/// The stack-N.md files are the only store. Edits saved to them come back through `pollStacks`.
 func save() {
-    let json = Saved.encode(world)
     let docs = (0..<stackCount).map { Data(stackDocument(name: world.config.names[$0], notes: world.stacks[$0]).utf8) }
-    let store = storeURL
     let urls = (0..<stackCount).map(stackURL)
     diskQueue.async {
-        write(json, to: store)
         for i in docs.indices { writeStack(i, docs[i], to: urls[i]) }
     }
 }
 
-/// What the app last wrote to, or read from, each stack file. Disk queue only.
-nonisolated(unsafe) var stackFiles = [Data?](repeating: nil, count: stackCount)
+/// The notes in the stack files, read once at launch. A missing file is an empty stack.
+func loadWorld() -> World {
+    var w = World()
+    for i in 0..<stackCount {
+        guard let data = try? Data(contentsOf: stackURL(i)) else { continue }
+        stackFiles[i] = data
+        w.stacks[i] = parseStackDocument(String(decoding: data, as: UTF8.self))
+    }
+    return w
+}
 
 nonisolated func writeStack(_ i: Int, _ doc: Data, to url: URL) {
     write(doc, to: url)
@@ -151,7 +153,6 @@ Keys.install(onKey)
 Keys.bind(world.config.keys)   // defaults; the first poll swaps in the file's keys if they differ
 pollConfig()
 pollConfig()   // picks up the defaults file the first call may have just written
-save()   // notes.json wins over stack files edited while Sendpoint wasn't running
 RunLoop.main.add(Timer(timeInterval: 1, repeats: true) { _ in
     MainActor.assumeIsolated {
         pollConfig()

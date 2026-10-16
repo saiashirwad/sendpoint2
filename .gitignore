@@ -1,6 +1,5 @@
 .build/
 dist/
-.wrangler/
 .DS_Store
 *.xcodeproj
 __pycache__/

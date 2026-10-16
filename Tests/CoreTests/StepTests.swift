@@ -149,21 +149,6 @@ private func tapMode() -> World {
     #expect(w.stacks[0].count == 1)
 }
 
-@Test func savedRoundTripsAndRepairsShape() {
-    var w = World()
-    w.stacks[1] = [Note(quote: "q", body: "b")]
-    w.active = 1
-    w.mode = .drafting(Draft(quote: "session only"))
-    let back = Saved.decode(Saved.encode(w))
-    #expect(back?.stacks == w.stacks)
-    #expect(back?.active == 1)
-    #expect(back?.mode == .idle)
-
-    let short = Data(#"{"stacks":[[]],"active":7}"#.utf8)
-    #expect(Saved.decode(short)?.stacks.count == stackCount)
-    #expect(Saved.decode(short)?.active == 0)
-}
-
 // MARK: Config
 
 @Test func defaultConfigFileParsesToTheBuiltInDefaults() {
@@ -287,11 +272,11 @@ private func tapMode() -> World {
     #expect(parseStackDocument(text) == [Note(quote: "kept", body: ""), Note(quote: "also kept", body: "and its body")])
 }
 
-@Test func anEditedFileReplacesItsStackAndSavesOnlyTheStore() {
+@Test func anEditedFileReplacesItsStackAndAndWritesNothing() {
     let start = run([.capture(selection: "a"), .commit, .capture(selection: "b"), .commit]).0
     let (w, fx) = run([.edited(stack: 0, [Note(quote: "b", body: "")])], from: start)
     #expect(w.stacks[0] == [Note(quote: "b", body: "")])
-    #expect(fx == [.saveStore])
+    #expect(fx.isEmpty)
     #expect(run([.edited(stack: 0, w.stacks[0])], from: w).1.isEmpty)   // the app's own file: nothing to do
 }
 

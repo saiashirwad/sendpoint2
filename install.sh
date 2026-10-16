@@ -40,6 +40,6 @@ pgrep -x "Sendpoint" >/dev/null 2>&1 || {
 }
 
 echo
-echo "Look for the speech-bubble icon in the menu bar."
+echo "Look for the ✎ in the menu bar."
 echo "If this is the first run, grant Accessibility when asked:"
 echo "  System Settings → Privacy & Security → Accessibility"
