@@ -47,7 +47,7 @@ final class IntegrationSmoke {
 
     func perform(_ effect: Effect) -> Bool {
         switch effect {
-        case .save, .open, .expireReadout, .prepareVoice: return false
+        case .save, .open, .expireReadout: return false
         case .paste(let text): pasted.append(text)
         case .bindKeys: bound = true
         case .micStart(let take):

@@ -306,22 +306,17 @@ private func tapMode() -> World {
     #expect(contextWords((0..<150).map { "word_\($0)" }.joined(separator: " ")).count == 100)
 }
 
-@Test func voiceLocaleComesFromConfig() {
-    let c = parseConfig("[voice]\nlocale = \" en-IN \"")
-    #expect(c.locale == "en-IN" && c.problems.isEmpty)
+@Test func unknownVoiceSettingIsReported() {
     #expect(parseConfig("[voice]\nvolume = 3").problems.count == 1)
 }
 
-@Test func changingTheLocaleReloadsTheVoice() {
+@Test func changingKeysRebindsThem() {
     var moved = Config()
-    moved.locale = "en-IN"
-    let (w, fx) = run([.configure(moved)])
-    #expect(w.voice == .preparing && fx == [.prepareVoice])
     moved.keys[0] = nil
-    let (_, both) = run([.configure(moved)], from: w)
-    #expect(both == [.bindKeys])
-    let (same, none) = run([.configure(Config())])
-    #expect(same.voice == .ready && none.isEmpty)
+    let (w, fx) = run([.configure(moved)])
+    #expect(w.voice == .ready && fx == [.bindKeys])
+    let (_, none) = run([.configure(Config())])
+    #expect(none.isEmpty)
 }
 
 @Test func misheardIdentifiersAreRespelledFromTheQuote() {

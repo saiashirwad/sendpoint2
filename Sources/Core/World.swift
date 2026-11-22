@@ -94,8 +94,6 @@ public enum Event: Equatable, Sendable {
 
 public enum Effect: Equatable, Sendable {
     case micStart(take: Int)
-    /// Load the transcriber for world.config's locale.
-    case prepareVoice
     case micStop(take: Int)
     case micCancel
     case paste(String)
@@ -203,10 +201,8 @@ private func decide(_ w: inout World, _ event: Event) -> [Effect] {
 
     case (_, .configure(let config)):
         let rebind = config.keys != w.config.keys
-        let reload = config.locale != w.config.locale
         w.config = config
-        if reload { w.voice = .preparing }
-        return (rebind ? [.bindKeys] : []) + (reload ? [.prepareVoice] : [])
+        return rebind ? [.bindKeys] : []
 
     case (_, .voice(let voice)):
         w.voice = voice

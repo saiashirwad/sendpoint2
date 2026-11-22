@@ -9,6 +9,7 @@ BUNDLE_ID="app.sendpoint"
 APP="/Applications/${APP_NAME}.app"
 SUPPORT="${HOME}/Library/Application Support/${APP_NAME}"
 CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/sendpoint"
+VOICE_MODEL="${HOME}/Library/Application Support/FluidAudio/Models/parakeet-unified-en-0.6b"
 
 remove() {
     local path="$1"
@@ -45,6 +46,7 @@ remove "$APP"
 echo "==> Removing notes and settings"
 remove "$SUPPORT"
 remove "$CONFIG_DIR"
+remove "$VOICE_MODEL"   # ~600 MB, downloaded on first launch
 delete_defaults "$BUNDLE_ID"
 
 echo "==> Resetting Accessibility and Microphone"

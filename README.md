@@ -11,9 +11,8 @@ A tiny macOS menu bar app for annotating what you read.
 5. **⌃⌘S** opens the current stack as a Markdown file in your editor.
 6. **⌃⌘V** pastes the current stack as Markdown into the front app and clears it.
 
-Shortcuts, stack names and the note card's size and opacity live in `~/.config/sendpoint/config.toml`, written with commented defaults on first launch. Changes apply when you save the file; mistakes show up in the menu bar menu. Under `[voice]`, `locale = "en-IN"` picks the speech model's language; empty uses the system's.
-
-Speech runs on-device with Apple's SpeechAnalyzer (macOS 26+). Sendpoint needs Accessibility (to read selections and paste) and Microphone.
+Shortcuts, stack names and the note card's size and opacity live in `~/.config/sendpoint/config.toml`, written with commented defaults on first launch. Changes apply when you save the file; mistakes show up in the menu bar menu.
+Speech runs on-device with NVIDIA Parakeet Unified (English, streaming) through FluidAudio, so text appears as you talk. The first launch downloads the ~600 MB model once. Sendpoint needs Accessibility (to read selections and paste) and Microphone.
 
 ```sh
 ./check.sh     # build + tests

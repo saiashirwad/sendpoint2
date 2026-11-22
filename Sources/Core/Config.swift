@@ -42,8 +42,6 @@ public struct Config: Equatable, Sendable {
     ]
     public var names = ["Reading notes", "Ideas", "Questions", "Scratch"]
     public var voice = VoiceMode.hold
-    /// A locale identifier such as "en-IN"; empty means the system language.
-    public var locale = ""
     public var lines = 4
     public var fontSize = 14.0
     public var opacity = 0.86
@@ -75,7 +73,6 @@ stack4 = "opt+l"
 [voice]
 mode   = "hold"   # hold: talk while the key is down, release to save
                   # tap:  tap to start, tap again to save
-locale = ""       # e.g. "en-IN"; empty uses the system language
 
 [stacks]
 1 = "Reading notes"
@@ -140,7 +137,6 @@ public func parseConfig(_ text: String) -> Config {
             case "mode":
                 if let mode = VoiceMode(rawValue: value) { c.voice = mode }
                 else { c.problems.append("line \(lineNumber): voice mode is \"hold\" or \"tap\"") }
-            case "locale": c.locale = trimmed(value)
             default: c.problems.append("line \(lineNumber): unknown voice setting '\(key)'")
             }
         case "card":

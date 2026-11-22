@@ -2,121 +2,101 @@ import Accelerate
 import AVFoundation
 import Core
 import CoreAudio
-import Speech
+import FluidAudio
 import Synchronization
 
-/// Microphone + on-device transcription. Reports back only through `send`,
+/// Microphone + on-device transcription (Parakeet Unified, streaming). Reports back only through `send`,
 /// tagged with the take number, so a late result for an old take is inert.
 final class Speech {
+    /// The 320 ms streaming tier: a chunk of 2 encoder frames plus 2 of look-ahead.
+    private nonisolated static let tier = UnifiedConfig(leftFrames: 70, chunkFrames: 2, rightFrames: 2)
+
     let meter = Meter()
     private var engine = AVAudioEngine()
     /// The input device `engine` records from: always the system default, checked at each take.
     private var device = AudioDeviceID(kAudioObjectUnknown)
-    /// The locale the loaded transcriber uses; set once `prepare` finishes.
-    private var locale = Locale.current
-    private var format: AVAudioFormat?
-    /// A prepared transcriber + analyzer, so a take starts without loading anything.
-    private var spare: (SpeechTranscriber, SpeechAnalyzer)?
-    private var current: (take: Int, input: AsyncStream<AnalyzerInput>.Continuation, analyzer: SpeechAnalyzer)?
-    /// The last locale setting asked for, so repeating it does nothing.
-    private var requested: String?
-    /// Counts `prepare` calls; a prepare that finds a newer one has begun is stale and stops.
-    private var generation = 0
-    /// The one microphone prompt, asked on the first `prepare`.
-    private var microphone: Task<Bool, Never>?
-    /// The locale whose assets are reserved; released when a different one replaces it.
-    private var reserved: Locale?
+    /// Loaded and warmed once at launch; nil until then. Takes run one at a time on it.
+    private var manager: StreamingUnifiedAsrManager?
+    private var preparing = false
+    private var current: (take: Int, input: AsyncStream<[Float]>.Continuation, task: Task<Void, Never>)?
+    /// The previous take's task: the next take waits for its `finish` and `reset` before it feeds the manager.
+    private var previous: Task<Void, Never>?
 
-    func prepare(locale setting: String) {
-        guard requested != setting else { return }
-        requested = setting
-        generation += 1
-        let mine = generation
-        spare = nil
-        format = nil
+    func prepare() {
+        guard !preparing, manager == nil else { return }
+        preparing = true
         Task {
-            if microphone == nil { microphone = Task { await AVCaptureDevice.requestAccess(for: .audio) } }
-            guard await microphone!.value else { return send(.voice(.unavailable("Microphone access denied"))) }
-            guard mine == generation else { return }
+            defer { preparing = false }
+            guard await AVCaptureDevice.requestAccess(for: .audio) else { return send(.voice(.unavailable("Microphone access denied"))) }
             useDefaultInput()   // the first engine's setup happens here, not on the first keypress
-            let wanted = setting.isEmpty ? Locale.current : Locale(identifier: setting)
-            // An unsupported system language falls back to US English; a language set in the config doesn't.
-            let fallback = setting.isEmpty ? Locale(identifier: "en-US") : nil
-            let resolved = await SpeechTranscriber.supportedLocale(equivalentTo: wanted) ?? fallback
-            guard mine == generation else { return }
-            guard let resolved else { return send(.voice(.unavailable("No voice for \(setting)"))) }
-            let probe = makeTranscriber(resolved)
             do {
-                if let install = try await AssetInventory.assetInstallationRequest(supporting: [probe]) {
-                    send(.voice(.downloading(0)))
-                    let watch = install.progress.observe(\.fractionCompleted) { progress, _ in
-                        let percent = Int(progress.fractionCompleted * 100)
-                        Task { @MainActor in
-                            // Only whole-percent changes reach step: at most ~100 events for the download.
-                            if mine == self.generation, case .downloading(let shown) = world.voice, shown < percent { send(.voice(.downloading(percent))) }
+                let loaded = StreamingUnifiedAsrManager(config: Self.tier)
+                try await loaded.loadModels { @Sendable progress in
+                    let percent = Int(progress.fractionCompleted * 100)
+                    DispatchQueue.main.async {
+                        MainActor.assumeIsolated {
+                            // Only whole-percent increases reach step: at most ~100 events for the download.
+                            switch world.voice {
+                            case .preparing: send(.voice(.downloading(percent)))
+                            case .downloading(let shown) where shown < percent: send(.voice(.downloading(percent)))
+                            default: break
+                            }
                         }
                     }
-                    defer { watch.invalidate() }
-                    try await install.downloadAndInstall()
                 }
+                try await Self.warmUp(loaded)
+                manager = loaded
+                send(.voice(.ready))
             } catch {
-                guard mine == generation else { return }
-                return send(.voice(.unavailable("Voice model unavailable: \(error.localizedDescription)")))
+                send(.voice(.unavailable("Voice model unavailable: \(error.localizedDescription)")))
             }
-            if reserved != resolved {
-                let old = reserved
-                reserved = resolved
-                _ = try? await AssetInventory.reserve(locale: resolved)
-                if let old { _ = await AssetInventory.release(reservedLocale: old) }
-            }
-            let best = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [probe])
-            guard mine == generation else { return }
-            (locale, format) = (resolved, best)
-            await prepareSpare()
-            guard mine == generation else { return }
-            send(.voice(format == nil ? .unavailable("Voice unavailable") : .ready))
         }
     }
 
+    /// One chunk of silence through the whole pipeline, so the first real take pays no compile or allocation cost.
+    private nonisolated static func warmUp(_ manager: StreamingUnifiedAsrManager) async throws {
+        let count = tier.chunkSamples + tier.rightSamples
+        guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false),
+              let silence = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count)) else { return }
+        silence.frameLength = AVAudioFrameCount(count)
+        silence.floatChannelData?[0].update(repeating: 0, count: count)
+        try await manager.appendAudio(silence)
+        try await manager.processBufferedAudio()
+        try await manager.reset()
+    }
+
     func start(take: Int) {
-        guard let format else { return send(.final(take: take, "")) }
-        let (transcriber, analyzer) = spare ?? fresh()
-        spare = nil
+        guard let manager else { return send(.final(take: take, "")) }
         useDefaultInput()
-        let (stream, input) = AsyncStream.makeStream(of: AnalyzerInput.self)
         let mic = engine.inputNode.inputFormat(forBus: 0)   // the hardware's rate; outputFormat can still hold the previous device's
-        guard let converter = AVAudioConverter(from: mic, to: format) else { return send(.final(take: take, "")) }
-        let tap = Tap(converter: converter, output: format, input: input, meter: meter)
+        guard let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false),
+              let converter = AVAudioConverter(from: mic, to: target) else { return send(.final(take: take, "")) }
+        let (stream, input) = AsyncStream.makeStream(of: [Float].self)
+        let tap = Tap(converter: converter, output: target, input: input, meter: meter)
         engine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: mic) { @Sendable buffer, _ in tap.feed(buffer) }
         do { try engine.start() } catch {
             engine.inputNode.removeTap(onBus: 0)
             return send(.final(take: take, ""))
         }
-        current = (take, input, analyzer)
-
-        let results = Task {
-            var text = ""
-            for try await result in transcriber.results {
-                let piece = String(result.text.characters)
-                if result.isFinal { text = Self.append(text, piece) }
-                send(.partial(take: take, result.isFinal ? text : Self.append(text, piece)))
+        let before = previous
+        let task = Task {
+            await before?.value
+            await manager.setPartialTranscriptCallback { text in
+                DispatchQueue.main.async { MainActor.assumeIsolated { send(.partial(take: take, text)) } }
             }
-            return text
-        }
-        Task {
-            do {
-                if let end = try await analyzer.analyzeSequence(stream) {
-                    try await analyzer.finalizeAndFinish(through: end)
-                } else {
-                    await analyzer.cancelAndFinishNow()
-                }
-                send(.final(take: take, try await results.value))
-            } catch {
-                results.cancel()
-                send(.final(take: take, ""))
+            for await samples in stream {
+                if Task.isCancelled { break }
+                guard let buffer = Self.buffer(samples) else { continue }
+                try? await manager.appendAudio(buffer)
+                try? await manager.processBufferedAudio()
             }
-            await prepareSpare()
+            let text = Task.isCancelled ? nil : try? await manager.finish()
+            await manager.setPartialTranscriptCallback { _ in }
+            try? await manager.reset()
+            if !Task.isCancelled { send(.final(take: take, text ?? "")) }
         }
+        current = (take, input, task)
+        previous = task
     }
 
     /// Ends the audio; the take's task finalizes and sends `.final`.
@@ -130,15 +110,23 @@ final class Speech {
     func cancel() {
         guard let current else { return }
         stopMic()
+        current.task.cancel()
         current.input.finish()
         self.current = nil
-        Task { await current.analyzer.cancelAndFinishNow() }
     }
 
     private func stopMic() {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         meter.set(0)
+    }
+
+    private nonisolated static func buffer(_ samples: [Float]) -> AVAudioPCMBuffer? {
+        guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)) else { return nil }
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer { buffer.floatChannelData?[0].update(from: $0.baseAddress!, count: samples.count) }
+        return buffer
     }
 
     /// AVAudioEngine keeps the device it was built with, so a new default input (AirPods connecting,
@@ -154,29 +142,6 @@ final class Speech {
         }
         device = now
         engine.prepare()
-    }
-
-    private func prepareSpare() async {
-        guard spare == nil, let format else { return }
-        let mine = generation
-        let pair = fresh()
-        try? await pair.1.prepareToAnalyze(in: format)
-        if spare == nil, mine == generation { spare = pair }
-    }
-
-    private func fresh() -> (SpeechTranscriber, SpeechAnalyzer) {
-        let transcriber = makeTranscriber(locale)
-        let options = SpeechAnalyzer.Options(priority: .userInitiated, modelRetention: .processLifetime)
-        return (transcriber, SpeechAnalyzer(modules: [transcriber], options: options))
-    }
-
-    private func makeTranscriber(_ locale: Locale) -> SpeechTranscriber {
-        SpeechTranscriber(locale: locale, preset: .progressiveTranscription)
-    }
-
-    private static func append(_ text: String, _ piece: String) -> String {
-        if text.isEmpty || piece.isEmpty || text.last!.isWhitespace || piece.first!.isWhitespace { return text + piece }
-        return text + " " + piece
     }
 }
 
@@ -198,14 +163,14 @@ nonisolated final class Meter: Sendable {
     func set(_ level: Float) { bits.store(level.bitPattern, ordering: .relaxed) }
 }
 
-/// Runs on the audio thread: converts mic buffers to the analyzer's format.
+/// Runs on the audio thread: converts mic buffers to 16 kHz mono samples for the model.
 nonisolated final class Tap: @unchecked Sendable {
     private let converter: AVAudioConverter
     private let output: AVAudioFormat
-    private let input: AsyncStream<AnalyzerInput>.Continuation
+    private let input: AsyncStream<[Float]>.Continuation
     private let meter: Meter
 
-    init(converter: AVAudioConverter, output: AVAudioFormat, input: AsyncStream<AnalyzerInput>.Continuation, meter: Meter) {
+    init(converter: AVAudioConverter, output: AVAudioFormat, input: AsyncStream<[Float]>.Continuation, meter: Meter) {
         self.converter = converter
         self.output = output
         self.input = input
@@ -230,6 +195,8 @@ nonisolated final class Tap: @unchecked Sendable {
             status.pointee = .haveData
             return buffer
         }
-        if error == nil, converted.frameLength > 0 { input.yield(AnalyzerInput(buffer: converted)) }
+        if error == nil, converted.frameLength > 0, let channel = converted.floatChannelData?[0] {
+            input.yield(Array(UnsafeBufferPointer(start: channel, count: Int(converted.frameLength))))
+        }
     }
 }
