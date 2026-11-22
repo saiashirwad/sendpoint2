@@ -137,7 +137,7 @@ private func decide(_ w: inout World, _ event: Event) -> [Effect] {
         w.mode = .listening(draft, partial: text, save: save)
         return []
     case (.listening(var draft, _, let save), .final(let take, let text)) where take == w.take:
-        draft.body = joined(draft.body, text)
+        draft.body = joined(draft.body, respelled(text, using: contextWords(draft.quote)))
         w.mode = .drafting(draft)
         // Nothing heard: leave the card open to type into rather than saving a bare quote.
         guard save, !trimmed(text).isEmpty else { return [] }

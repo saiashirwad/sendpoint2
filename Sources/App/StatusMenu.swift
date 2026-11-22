@@ -4,12 +4,24 @@ import Core
 /// Menu bar item: shows the active stack, switches stacks, opens and pastes, edits the config.
 final class StatusMenu: NSObject {
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    private var shown = ""
+    private var shown: Shown?
+
+    /// Everything the menu shows, so a render that changes nothing is skipped.
+    private struct Shown: Equatable {
+        var counts: [Int]
+        var active: Int
+        var idle: Bool
+        var trusted: Bool
+        var voice: Voice
+        var config: Config
+        var problems: [String]
+    }
 
     func render(_ w: World) {
         let count = w.stacks[w.active].count
         // Typing re-renders on every keystroke; rebuild only when what's shown changes.
-        let key = "\(w.stacks.map(\.count)) \(w.active) \(w.mode == .idle) \(AXIsProcessTrusted()) \(w.voice) \(w.config) \(Keys.problems)"
+        let key = Shown(counts: w.stacks.map(\.count), active: w.active, idle: w.mode == .idle,
+                        trusted: AXIsProcessTrusted(), voice: w.voice, config: w.config, problems: Keys.problems)
         guard key != shown else { return }
         shown = key
         item.button?.title = "✎ \(w.active + 1)" + (count > 0 ? "·\(count)" : "")

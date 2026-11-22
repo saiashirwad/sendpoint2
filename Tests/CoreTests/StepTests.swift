@@ -298,3 +298,45 @@ private func tapMode() -> World {
     #expect(run([.clear]).1.isEmpty)
     #expect(run([.capture(selection: "x"), .clear], from: start).0.stacks[0].count == 1)
 }
+
+@Test func contextWordsKeepIdentifiersAndNames() {
+    let text = "Okay so the panel calls useDefaultInput before the SpeechAnalyzer prepares. Then FluidAudio's TdtDecoderV3 and parse_stack in Sendpoint use the API and Zod."
+    #expect(contextWords(text) == ["useDefaultInput", "SpeechAnalyzer", "FluidAudio", "TdtDecoderV3", "parse_stack", "Sendpoint", "API", "Zod"])
+    #expect(contextWords("plain words only. Nothing here.").isEmpty)
+    #expect(contextWords((0..<150).map { "word_\($0)" }.joined(separator: " ")).count == 100)
+}
+
+@Test func unknownVoiceSettingIsReported() {
+    #expect(parseConfig("[voice]\nvolume = 3").problems.count == 1)
+}
+
+@Test func changingKeysRebindsThem() {
+    var moved = Config()
+    moved.keys[0] = nil
+    let (w, fx) = run([.configure(moved)])
+    #expect(w.voice == .ready && fx == [.bindKeys])
+    let (_, none) = run([.configure(Config())])
+    #expect(none.isEmpty)
+}
+
+@Test func misheardIdentifiersAreRespelledFromTheQuote() {
+    let quote = "Okay so the panel calls useDefaultInput before the SpeechAnalyzer prepares, and then Tap feed converts buffers. I think FluidAudio's TdtDecoderV3 and the parseStackDocument function in Sendpoint both need kubectl rollout restart and a Zod schema."
+    let heard = "Okay, so the panel calls used default input before the speech analyzer prepares, and then tap feed converts buffers. I think fluid Audios, TDT, decoder V3 and the par stacked document function in sendpoint both need cubic to rollout restart in a zod schema."
+    #expect(respelled(heard, using: contextWords(quote)) == "Okay, so the panel calls useDefaultInput before the SpeechAnalyzer prepares, and then Tap feed converts buffers. I think FluidAudio, TdtDecoderV3 and the parseStackDocument function in Sendpoint both need cubic to rollout restart in a Zod schema.")
+}
+
+@Test func respellingLeavesOrdinaryWordsAlone() {
+    let plain = "  the quick brown fox,  jumps over\tthe lazy dog. Then it parses stacks of documents. "
+    #expect(respelled(plain, using: ["useDefaultInput", "TdtDecoderV3", "Sendpoint", "Zod"]) == plain)
+    #expect(respelled("the parser is stacked", using: ["parseStackDocument"]) == "the parser is stacked")
+}
+
+@Test func aSpokenTermWithOnePartMustMatchExactly() {
+    #expect(respelled("send point is (zod) fine", using: ["Sendpoint", "Zod"]) == "Sendpoint is (Zod) fine")
+    #expect(respelled("zodiac sends points", using: ["Sendpoint", "Zod"]) == "zodiac sends points")
+}
+
+@Test func spokenNotesAreRespelledWhenSaved() {
+    let (w, _) = run([.speakDown(selection: "it calls parseStackDocument twice"), .partial(take: 1, "the par stacked"), .speakUp, .final(take: 1, "the par stacked document is slow")])
+    #expect(w.stacks[0] == [Note(quote: "it calls parseStackDocument twice", body: "the parseStackDocument is slow")])
+}

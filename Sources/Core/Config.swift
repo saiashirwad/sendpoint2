@@ -71,8 +71,8 @@ stack3 = "opt+k"
 stack4 = "opt+l"
 
 [voice]
-mode = "hold"   # hold: talk while the key is down, release to save
-                # tap:  tap to start, tap again to save
+mode   = "hold"   # hold: talk while the key is down, release to save
+                  # tap:  tap to start, tap again to save
 
 [stacks]
 1 = "Reading notes"
@@ -133,15 +133,12 @@ public func parseConfig(_ text: String) -> Config {
             }
             c.names[n - 1] = value.isEmpty ? "Stack \(n)" : value
         case "voice":
-            guard key == "mode" else {
-                c.problems.append("line \(lineNumber): unknown voice setting '\(key)'")
-                continue
+            switch key {
+            case "mode":
+                if let mode = VoiceMode(rawValue: value) { c.voice = mode }
+                else { c.problems.append("line \(lineNumber): voice mode is \"hold\" or \"tap\"") }
+            default: c.problems.append("line \(lineNumber): unknown voice setting '\(key)'")
             }
-            guard let mode = VoiceMode(rawValue: value) else {
-                c.problems.append("line \(lineNumber): voice mode is \"hold\" or \"tap\"")
-                continue
-            }
-            c.voice = mode
         case "card":
             guard let number = Double(value) else {
                 c.problems.append("line \(lineNumber): \(key) needs a number")

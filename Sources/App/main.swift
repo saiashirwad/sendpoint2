@@ -185,6 +185,6 @@ RunLoop.main.add(Timer(timeInterval: 1, repeats: true) { _ in
     }
 }, forMode: .common)
 _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
-speech?.prewarm()
+speech?.prepare()
 render()
 app?.run()

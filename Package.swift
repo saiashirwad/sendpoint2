@@ -12,11 +12,14 @@ let typeCheckBudget: [SwiftSetting] = [
 let package = Package(
     name: "Sendpoint",
     platforms: [.macOS(.v26)],
+    dependencies: [
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", .upToNextMinor(from: "0.18.4"), traits: ["TTS", "Diarizer"]),
+    ],
     targets: [
         .target(name: "Core", swiftSettings: typeCheckBudget),
         .executableTarget(
             name: "Sendpoint",
-            dependencies: ["Core"],
+            dependencies: ["Core", "FluidAudio"],
             path: "Sources/App",
             swiftSettings: typeCheckBudget + [.defaultIsolation(MainActor.self)]
         ),

@@ -6,7 +6,7 @@ Select text in any app, annotate it by typing or speaking, collect notes in one 
 
 - All behavior lives in `step(&world, event) -> [Effect]` in `Sources/Core/World.swift`. It is pure (Foundation only) and the only place decisions are made.
 - `Sources/App/main.swift` is the loop: a key or callback sends an `Event`, `step` updates `world`, `render()` redraws from `world`, and `perform` carries out each `Effect`.
-- The App files only translate: `Keys` (Carbon hotkeys), `Selection` (Accessibility read, ⌘C fallback, ⌘V paste), `Speech` (mic + SpeechAnalyzer + level meter), `Panel` (the note card), `Readout` (the pill that flashes after a stack shortcut), `StatusMenu`.
+- The App files only translate: `Keys` (Carbon hotkeys), `Selection` (Accessibility read, ⌘C fallback, ⌘V paste), `Speech` (mic + FluidAudio's Parakeet Unified streaming model + level meter), `Panel` (the note card), `Readout` (the pill that flashes after a stack shortcut), `StatusMenu`.
 - Speech results carry their `take`. `step` drops any result whose take doesn't match, so old or cancelled recordings can't land.
 - Notes persist only as Markdown: `~/Library/Application Support/Sendpoint/stack-N.md`, one per stack, read at launch by `loadWorld` and written off the main thread on every change. The `open` shortcut opens that file in the user's editor. Edits saved there come back: `pollStacks` reads the files once a second on the disk queue and sends `.edited` when one differs from what the app last wrote, and `parseStackDocument` turns it back into notes. There is no stack viewer.
 - Settings are `~/.config/sendpoint/config.toml` (or `$XDG_CONFIG_HOME`), a small TOML subset parsed by `parseConfig` in `Sources/Core/Config.swift` into `world.config`. `main.swift` polls its mtime once a second and sends `.configure`; a change to the keys yields `.bindKeys`. The file is written from `defaultConfigText` when missing. There is no settings window: the menu's "Edit Config…" opens the file, and mistakes in it show in the menu.
@@ -15,7 +15,7 @@ Select text in any app, annotate it by typing or speaking, collect notes in one 
 
 - New behavior is a new `Event` or `Effect` case, a `step` branch, and a test in `Tests/CoreTests/StepTests.swift`. Views never decide; they `send`.
 - Keep the hot path synchronous: hotkey → read selection → `send`. Build windows and load models at launch, never on a keypress.
-- No SwiftUI, no macros, no dependencies. Code that is slow to type-check gets a compiler warning (see `Package.swift`); fix it.
+- No SwiftUI, no macros. One dependency: FluidAudio, in the App target only; Core stays Foundation-only. Speech runs on its Parakeet Unified 0.6B model (English, streaming); the ~600 MB model downloads on first launch to `~/Library/Application Support/FluidAudio/Models`. Code that is slow to type-check gets a compiler warning (see `Package.swift`); fix it.
 - Main thread everywhere (`defaultIsolation(MainActor)`). Only `Tap` in `Speech.swift` runs on the audio thread.
 - Shortcuts and card look come from the config file only. A new setting is a `Config` field, a `parseConfig` case and a line in `defaultConfigText`; `defaultConfigFileParsesToTheBuiltInDefaults` keeps the last two in step.
 - Write the concrete code first and pull out a shared piece only once it is needed in a second place. No tables, protocols or helpers for a single use.
