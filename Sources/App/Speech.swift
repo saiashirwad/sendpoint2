@@ -11,12 +11,22 @@ final class Speech {
     /// The 320 ms streaming tier: a chunk of 2 encoder frames plus 2 of look-ahead.
     private nonisolated static let tier = UnifiedConfig(leftFrames: 70, chunkFrames: 2, rightFrames: 2)
 
+    /// A term replaces a heard word only when the audio alone favors it (cbw 0) and the spelling is close (0.7):
+    /// FluidAudio's dictation setting. The defaults also turned "speech analysis" into SpeechAnalyzer in a sentence that never named it.
+    private nonisolated static let thresholds = VocabularyBoostingSession.Thresholds(cbw: 0, minSimilarity: 0.7)
+
     let meter = Meter()
     private var engine = AVAudioEngine()
     /// The input device `engine` records from: always the system default, checked at each take.
     private var device = AudioDeviceID(kAudioObjectUnknown)
     /// Loaded and warmed once at launch; nil until then. Takes run one at a time on it.
     private var manager: StreamingUnifiedAsrManager?
+    /// The CTC model that checks the selection's names against the audio; nil if it didn't load (notes are then not boosted).
+    private var ctc: CtcModels?
+    /// Whether `manager` still holds a take's vocabulary, which the next take must replace.
+    private var boosted = false
+    /// Names that arrived after the take started (the quote came in late), for its task to apply between buffers.
+    private var late: (take: Int, words: [String])?
     private var preparing = false
     private var current: (take: Int, input: AsyncStream<[Float]>.Continuation, task: Task<Void, Never>)?
     /// The previous take's task: the next take waits for its `finish` and `reset` before it feeds the manager.
@@ -29,22 +39,24 @@ final class Speech {
             defer { preparing = false }
             guard await AVCaptureDevice.requestAccess(for: .audio) else { return send(.voice(.unavailable("Microphone access denied"))) }
             useDefaultInput()   // the first engine's setup happens here, not on the first keypress
-            do {
-                let loaded = StreamingUnifiedAsrManager(config: Self.tier)
-                try await loaded.loadModels { @Sendable progress in
-                    let percent = Int(progress.fractionCompleted * 100)
-                    DispatchQueue.main.async {
-                        MainActor.assumeIsolated {
-                            // Only whole-percent increases reach step: at most ~100 events for the download.
-                            switch world.voice {
-                            case .preparing: send(.voice(.downloading(percent)))
-                            case .downloading(let shown) where shown < percent: send(.voice(.downloading(percent)))
-                            default: break
-                            }
+            // Only whole-percent changes reach step: at most ~100 events per download. The CTC model's pass starts over from 0.
+            let report: @Sendable (DownloadProgress) -> Void = { progress in
+                let percent = Int(progress.fractionCompleted * 100)
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        switch world.voice {
+                        case .preparing: send(.voice(.downloading(percent)))
+                        case .downloading(let shown) where shown != percent: send(.voice(.downloading(percent)))
+                        default: break
                         }
                     }
                 }
+            }
+            do {
+                let loaded = StreamingUnifiedAsrManager(config: Self.tier)
+                try await loaded.loadModels(progressHandler: report)
                 try await Self.warmUp(loaded)
+                ctc = try? await CtcModels.downloadAndLoad(progressHandler: report)
                 manager = loaded
                 send(.voice(.ready))
             } catch {
@@ -65,7 +77,7 @@ final class Speech {
         try await manager.reset()
     }
 
-    func start(take: Int) {
+    func start(take: Int, words: [String]) {
         guard let manager else { return send(.final(take: take, "")) }
         useDefaultInput()
         let mic = engine.inputNode.inputFormat(forBus: 0)   // the hardware's rate; outputFormat can still hold the previous device's
@@ -81,11 +93,16 @@ final class Speech {
         let before = previous
         let task = Task {
             await before?.value
+            await bias(words)
             await manager.setPartialTranscriptCallback { text in
                 DispatchQueue.main.async { MainActor.assumeIsolated { send(.partial(take: take, text)) } }
             }
             for await samples in stream {
                 if Task.isCancelled { break }
+                if let names = late, names.take == take {
+                    late = nil
+                    await bias(names.words)
+                }
                 guard let buffer = Self.buffer(samples) else { continue }
                 try? await manager.appendAudio(buffer)
                 try? await manager.processBufferedAudio()
@@ -97,6 +114,23 @@ final class Speech {
         }
         current = (take, input, task)
         previous = task
+    }
+
+    /// The quote arrived after the take started: bias the rest of it toward these names.
+    func words(take: Int, _ words: [String]) {
+        guard current?.take == take else { return }
+        late = (take, words)
+    }
+
+    /// Points the manager's vocabulary boosting at `words`, or, with none, clears what the last take left.
+    /// Mid-stream is fine: FluidAudio then rescores only the audio from here on.
+    private func bias(_ words: [String]) async {
+        guard let manager, let ctc, boosted || !words.isEmpty, !Task.isCancelled else { return }
+        let vocabulary = CustomVocabularyContext(terms: words.map { CustomVocabularyTerm(text: $0) })
+        do {
+            try await manager.configureVocabularyBoosting(vocabulary: vocabulary, ctcModels: ctc, thresholds: Self.thresholds)
+            boosted = !words.isEmpty
+        } catch {}
     }
 
     /// Ends the audio; the take's task finalizes and sends `.final`.

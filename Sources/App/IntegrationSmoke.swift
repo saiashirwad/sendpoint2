@@ -50,7 +50,8 @@ final class IntegrationSmoke {
         case .save, .open, .expireReadout: return false
         case .paste(let text): pasted.append(text)
         case .bindKeys: bound = true
-        case .micStart(let take):
+        case .micWords: break
+        case .micStart(let take, _):
             started.append(take)
             DispatchQueue.main.async { send(.partial(take: take, "partial speech")) }
         case .micStop(let take):

@@ -93,7 +93,10 @@ public enum Event: Equatable, Sendable {
 }
 
 public enum Effect: Equatable, Sendable {
-    case micStart(take: Int)
+    /// `words`: the identifiers and names in the quote, which the transcriber should favor.
+    case micStart(take: Int, words: [String])
+    /// The quote arrived once the take was running.
+    case micWords(take: Int, [String])
     case micStop(take: Int)
     case micCancel
     case paste(String)
@@ -150,7 +153,8 @@ private func decide(_ w: inout World, _ event: Event) -> [Effect] {
     case (.listening(var draft, let partial, let save), .quoted(let text)) where draft.quote.isEmpty:
         draft.quote = text
         w.mode = .listening(draft, partial: partial, save: save)
-        return []
+        let words = contextWords(text)
+        return words.isEmpty ? [] : [.micWords(take: w.take, words)]
 
     case (.drafting(var draft), .edit(let text)):
         draft.body = text
@@ -216,7 +220,7 @@ private func decide(_ w: inout World, _ event: Event) -> [Effect] {
 private func listen(_ w: inout World, _ draft: Draft, save: Bool) -> [Effect] {
     w.take += 1
     w.mode = .listening(draft, partial: "", save: save)
-    return [.micStart(take: w.take)]
+    return [.micStart(take: w.take, words: contextWords(draft.quote))]
 }
 
 func joined(_ body: String, _ spoken: String) -> String {

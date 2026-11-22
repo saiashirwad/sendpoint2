@@ -28,7 +28,8 @@ func render() {
 func perform(_ effect: Effect) {
     if let smoke, smoke.perform(effect) { return }
     switch effect {
-    case .micStart(let take): speech?.start(take: take)
+    case .micStart(let take, let words): speech?.start(take: take, words: words)
+    case .micWords(let take, let words): speech?.words(take: take, words)
     case .micStop(let take): speech?.stop(take: take)
     case .micCancel: speech?.cancel()
     case .paste(let markdown): Selection.paste(markdown)

@@ -58,12 +58,12 @@ private func tapMode() -> World {
     ])
     #expect(w.mode == .idle)
     #expect(w.stacks[0] == [Note(quote: "sel", body: "hello there")])
-    #expect(fx == [.micStart(take: 1), .micStop(take: 1), .save])
+    #expect(fx == [.micStart(take: 1, words: []), .micStop(take: 1), .save])
 }
 
 @Test func tapStartsAndTheNextTapStopsAndSaves() {
     let (w, fx) = run([.speakDown(selection: "sel"), .speakUp], from: tapMode())
-    #expect(fx == [.micStart(take: 1)])
+    #expect(fx == [.micStart(take: 1, words: [])])
     #expect(w.mode == .listening(Draft(quote: "sel"), partial: "", save: true))
 
     let (done, more) = run([.speakDown(selection: ""), .speakUp, .final(take: 1, "said")], from: w)
@@ -80,14 +80,14 @@ private func tapMode() -> World {
     ])
     #expect(w.mode == .drafting(Draft(quote: "q", body: "typed hello there")))
     #expect(w.stacks[0].isEmpty)
-    #expect(fx == [.micStart(take: 1), .micStop(take: 1)])
+    #expect(fx == [.micStart(take: 1, words: []), .micStop(take: 1)])
 }
 
 @Test func hearingNothingLeavesTheCardOpenInsteadOfSaving() {
     let (w, fx) = run([.speakDown(selection: "sel"), .speakUp, .final(take: 1, " ")])
     #expect(w.mode == .drafting(Draft(quote: "sel")))
     #expect(w.stacks[0].isEmpty)
-    #expect(fx == [.micStart(take: 1), .micStop(take: 1)])
+    #expect(fx == [.micStart(take: 1, words: []), .micStop(take: 1)])
 }
 
 @Test func speakingBeforeTheModelIsInOpensTheCardForTyping() {
@@ -99,7 +99,7 @@ private func tapMode() -> World {
 
     let (later, more) = run([.voice(.ready), .speakDown(selection: "")], from: w)
     #expect(later.mode == .listening(Draft(quote: "sel"), partial: "", save: false))
-    #expect(more == [.micStart(take: 1)])
+    #expect(more == [.micStart(take: 1, words: [])])
 }
 
 @Test func voiceModeComesFromConfig() {
@@ -115,7 +115,7 @@ private func tapMode() -> World {
         .final(take: 2, "new"),
     ])
     #expect(w.stacks[0] == [Note(quote: "", body: "new")])
-    #expect(fx == [.micStart(take: 1), .micCancel, .micStart(take: 2), .save])
+    #expect(fx == [.micStart(take: 1, words: []), .micCancel, .micStart(take: 2, words: []), .save])
 }
 
 @Test func resultsAfterCancelDoNothing() {
@@ -339,4 +339,24 @@ private func tapMode() -> World {
 @Test func spokenNotesAreRespelledWhenSaved() {
     let (w, _) = run([.speakDown(selection: "it calls parseStackDocument twice"), .partial(take: 1, "the par stacked"), .speakUp, .final(take: 1, "the par stacked document is slow")])
     #expect(w.stacks[0] == [Note(quote: "it calls parseStackDocument twice", body: "the parseStackDocument is slow")])
+}
+
+@Test func theQuotesNamesGoToTheMicWhenATakeStarts() {
+    let (_, fx) = run([.speakDown(selection: "call useDefaultInput on the Tap"), .speakUp])
+    #expect(fx == [.micStart(take: 1, words: ["useDefaultInput", "Tap"]), .micStop(take: 1)])
+}
+
+@Test func aQuoteThatArrivesMidTakeSendsItsNamesAndAnEmptyOneSendsNothing() {
+    let (w, fx) = run([.speakDown(selection: ""), .quoted("parseStackDocument reads Zod")])
+    #expect(w.mode == .listening(Draft(quote: "parseStackDocument reads Zod"), partial: "", save: true))
+    #expect(fx == [.micStart(take: 1, words: []), .micWords(take: 1, ["parseStackDocument", "Zod"])])
+
+    let (_, plain) = run([.speakDown(selection: ""), .quoted("nothing special here"), .quoted("TdtDecoderV3")])
+    #expect(plain == [.micStart(take: 1, words: [])])   // the second quote finds the first already in place
+}
+
+@Test func aNameAlreadySpelledRightKeepsTheWordsAroundIt() {
+    let words = ["useDefaultInput", "TdtDecoderV3"]
+    #expect(respelled("the SpeechAnalyzer said useDefaultInput was fine", using: words) == "the SpeechAnalyzer said useDefaultInput was fine")
+    #expect(respelled("FluidAudio TdtDecoderV3 and the rest", using: words) == "FluidAudio TdtDecoderV3 and the rest")
 }

@@ -12,7 +12,7 @@ A tiny macOS menu bar app for annotating what you read.
 6. **⌃⌘V** pastes the current stack as Markdown into the front app and clears it.
 
 Shortcuts, stack names and the note card's size and opacity live in `~/.config/sendpoint/config.toml`, written with commented defaults on first launch. Changes apply when you save the file; mistakes show up in the menu bar menu.
-Speech runs on-device with NVIDIA Parakeet Unified (English, streaming) through FluidAudio, so text appears as you talk. The first launch downloads the ~600 MB model once. Sendpoint needs Accessibility (to read selections and paste) and Microphone.
+Speech runs on-device with NVIDIA Parakeet Unified (English, streaming) through FluidAudio, so text appears as you talk. The names and identifiers in your selection bias the transcription (FluidAudio's vocabulary boosting, an extra ~100 MB model). The first launch downloads the ~700 MB of models once. Sendpoint needs Accessibility (to read selections and paste) and Microphone.
 
 ```sh
 ./check.sh     # build + tests

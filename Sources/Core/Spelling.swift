@@ -33,7 +33,7 @@ public func respelled(_ heard: String, using words: [String]) -> String {
         let n = spokenParts(term).count
         let target = skeleton(term)
         guard n > 0, !target.isEmpty else { continue }
-        for length in (n == 1 ? 1...2 : max(1, n - 1)...(n + 1)) where length <= skeletons.count {
+        for length in (n == 1 ? 1...2 : 1...(n + 1)) where length <= skeletons.count {
             for start in 0...(skeletons.count - length) {
                 let window = skeletons[start..<(start + length)].joined()
                 guard let distance = closeness(window, target, parts: n) else { continue }

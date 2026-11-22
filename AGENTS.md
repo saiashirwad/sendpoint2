@@ -15,7 +15,7 @@ Select text in any app, annotate it by typing or speaking, collect notes in one 
 
 - New behavior is a new `Event` or `Effect` case, a `step` branch, and a test in `Tests/CoreTests/StepTests.swift`. Views never decide; they `send`.
 - Keep the hot path synchronous: hotkey → read selection → `send`. Build windows and load models at launch, never on a keypress.
-- No SwiftUI, no macros. One dependency: FluidAudio, in the App target only; Core stays Foundation-only. Speech runs on its Parakeet Unified 0.6B model (English, streaming); the ~600 MB model downloads on first launch to `~/Library/Application Support/FluidAudio/Models`. Code that is slow to type-check gets a compiler warning (see `Package.swift`); fix it.
+- No SwiftUI, no macros. One dependency: FluidAudio, in the App target only; Core stays Foundation-only. Speech runs on its Parakeet Unified 0.6B model (English, streaming); the ~600 MB model downloads on first launch (plus a ~100 MB CTC model that biases each take toward `contextWords(quote)`, sent as `micStart`/`micWords` words) to `~/Library/Application Support/FluidAudio/Models`. Code that is slow to type-check gets a compiler warning (see `Package.swift`); fix it.
 - Main thread everywhere (`defaultIsolation(MainActor)`). Only `Tap` in `Speech.swift` runs on the audio thread.
 - Shortcuts and card look come from the config file only. A new setting is a `Config` field, a `parseConfig` case and a line in `defaultConfigText`; `defaultConfigFileParsesToTheBuiltInDefaults` keeps the last two in step.
 - Write the concrete code first and pull out a shared piece only once it is needed in a second place. No tables, protocols or helpers for a single use.
