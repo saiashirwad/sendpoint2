@@ -1,3 +1,4 @@
+import Accelerate
 import AVFoundation
 import Core
 import CoreAudio
@@ -11,19 +12,40 @@ final class Speech {
     private var engine = AVAudioEngine()
     /// The input device `engine` records from: always the system default, checked at each take.
     private var device = AudioDeviceID(kAudioObjectUnknown)
+    /// The locale the loaded transcriber uses; set once `prepare` finishes.
     private var locale = Locale.current
     private var format: AVAudioFormat?
     /// A prepared transcriber + analyzer, so a take starts without loading anything.
     private var spare: (SpeechTranscriber, SpeechAnalyzer)?
     private var current: (take: Int, input: AsyncStream<AnalyzerInput>.Continuation, analyzer: SpeechAnalyzer)?
+    /// The last locale setting asked for, so repeating it does nothing.
+    private var requested: String?
+    /// Counts `prepare` calls; a prepare that finds a newer one has begun is stale and stops.
+    private var generation = 0
+    /// The one microphone prompt, asked on the first `prepare`.
+    private var microphone: Task<Bool, Never>?
+    /// The locale whose assets are reserved; released when a different one replaces it.
+    private var reserved: Locale?
 
-    func prewarm() {
+    func prepare(locale setting: String) {
+        guard requested != setting else { return }
+        requested = setting
+        generation += 1
+        let mine = generation
+        spare = nil
+        format = nil
         Task {
-            guard await AVCaptureDevice.requestAccess(for: .audio) else { return send(.voice(.unavailable("Microphone access denied"))) }
+            if microphone == nil { microphone = Task { await AVCaptureDevice.requestAccess(for: .audio) } }
+            guard await microphone!.value else { return send(.voice(.unavailable("Microphone access denied"))) }
+            guard mine == generation else { return }
             useDefaultInput()   // the first engine's setup happens here, not on the first keypress
-            guard SpeechTranscriber.isAvailable else { return send(.voice(.unavailable("Voice unavailable on this Mac"))) }
-            locale = await SpeechTranscriber.supportedLocale(equivalentTo: .current) ?? Locale(identifier: "en-US")
-            let probe = makeTranscriber()
+            let wanted = setting.isEmpty ? Locale.current : Locale(identifier: setting)
+            // An unsupported system language falls back to US English; a language set in the config doesn't.
+            let fallback = setting.isEmpty ? Locale(identifier: "en-US") : nil
+            let resolved = await SpeechTranscriber.supportedLocale(equivalentTo: wanted) ?? fallback
+            guard mine == generation else { return }
+            guard let resolved else { return send(.voice(.unavailable("No voice for \(setting)"))) }
+            let probe = makeTranscriber(resolved)
             do {
                 if let install = try await AssetInventory.assetInstallationRequest(supporting: [probe]) {
                     send(.voice(.downloading(0)))
@@ -31,15 +53,27 @@ final class Speech {
                         let percent = Int(progress.fractionCompleted * 100)
                         Task { @MainActor in
                             // Only whole-percent changes reach step: at most ~100 events for the download.
-                            if case .downloading(let shown) = world.voice, shown < percent { send(.voice(.downloading(percent))) }
+                            if mine == self.generation, case .downloading(let shown) = world.voice, shown < percent { send(.voice(.downloading(percent))) }
                         }
                     }
                     defer { watch.invalidate() }
                     try await install.downloadAndInstall()
                 }
-            } catch { return send(.voice(.unavailable("Voice model unavailable: \(error.localizedDescription)"))) }
-            format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [probe])
+            } catch {
+                guard mine == generation else { return }
+                return send(.voice(.unavailable("Voice model unavailable: \(error.localizedDescription)")))
+            }
+            if reserved != resolved {
+                let old = reserved
+                reserved = resolved
+                _ = try? await AssetInventory.reserve(locale: resolved)
+                if let old { _ = await AssetInventory.release(reservedLocale: old) }
+            }
+            let best = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [probe])
+            guard mine == generation else { return }
+            (locale, format) = (resolved, best)
             await prepareSpare()
+            guard mine == generation else { return }
             send(.voice(format == nil ? .unavailable("Voice unavailable") : .ready))
         }
     }
@@ -124,18 +158,19 @@ final class Speech {
 
     private func prepareSpare() async {
         guard spare == nil, let format else { return }
+        let mine = generation
         let pair = fresh()
         try? await pair.1.prepareToAnalyze(in: format)
-        if spare == nil { spare = pair }
+        if spare == nil, mine == generation { spare = pair }
     }
 
     private func fresh() -> (SpeechTranscriber, SpeechAnalyzer) {
-        let transcriber = makeTranscriber()
+        let transcriber = makeTranscriber(locale)
         let options = SpeechAnalyzer.Options(priority: .userInitiated, modelRetention: .processLifetime)
         return (transcriber, SpeechAnalyzer(modules: [transcriber], options: options))
     }
 
-    private func makeTranscriber() -> SpeechTranscriber {
+    private func makeTranscriber(_ locale: Locale) -> SpeechTranscriber {
         SpeechTranscriber(locale: locale, preset: .progressiveTranscription)
     }
 
@@ -179,9 +214,9 @@ nonisolated final class Tap: @unchecked Sendable {
 
     func feed(_ buffer: AVAudioPCMBuffer) {
         if let samples = buffer.floatChannelData?[0], buffer.frameLength > 0 {
-            var sum: Float = 0
-            for i in 0..<Int(buffer.frameLength) { sum += samples[i] * samples[i] }
-            let db = 10 * log10(max(sum / Float(buffer.frameLength), 1e-10))   // power → dB
+            var power: Float = 0
+            vDSP_measqv(samples, 1, &power, vDSP_Length(buffer.frameLength))
+            let db = 10 * log10(max(power, 1e-10))   // power → dB
             meter.set(min(max((db + 55) / 45, 0), 1))
         }
         let ratio = output.sampleRate / buffer.format.sampleRate

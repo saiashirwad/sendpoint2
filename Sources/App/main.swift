@@ -29,6 +29,7 @@ func perform(_ effect: Effect) {
     if let smoke, smoke.perform(effect) { return }
     switch effect {
     case .micStart(let take): speech?.start(take: take)
+    case .prepareVoice: speech?.prepare(locale: world.config.locale)
     case .micStop(let take): speech?.stop(take: take)
     case .micCancel: speech?.cancel()
     case .paste(let markdown): Selection.paste(markdown)
@@ -185,6 +186,6 @@ RunLoop.main.add(Timer(timeInterval: 1, repeats: true) { _ in
     }
 }, forMode: .common)
 _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
-speech?.prewarm()
+speech?.prepare(locale: world.config.locale)   // a no-op if pollConfig already asked
 render()
 app?.run()

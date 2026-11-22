@@ -94,6 +94,8 @@ public enum Event: Equatable, Sendable {
 
 public enum Effect: Equatable, Sendable {
     case micStart(take: Int)
+    /// Load the transcriber for world.config's locale.
+    case prepareVoice
     case micStop(take: Int)
     case micCancel
     case paste(String)
@@ -137,7 +139,7 @@ private func decide(_ w: inout World, _ event: Event) -> [Effect] {
         w.mode = .listening(draft, partial: text, save: save)
         return []
     case (.listening(var draft, _, let save), .final(let take, let text)) where take == w.take:
-        draft.body = joined(draft.body, text)
+        draft.body = joined(draft.body, respelled(text, using: contextWords(draft.quote)))
         w.mode = .drafting(draft)
         // Nothing heard: leave the card open to type into rather than saving a bare quote.
         guard save, !trimmed(text).isEmpty else { return [] }
@@ -201,8 +203,10 @@ private func decide(_ w: inout World, _ event: Event) -> [Effect] {
 
     case (_, .configure(let config)):
         let rebind = config.keys != w.config.keys
+        let reload = config.locale != w.config.locale
         w.config = config
-        return rebind ? [.bindKeys] : []
+        if reload { w.voice = .preparing }
+        return (rebind ? [.bindKeys] : []) + (reload ? [.prepareVoice] : [])
 
     case (_, .voice(let voice)):
         w.voice = voice

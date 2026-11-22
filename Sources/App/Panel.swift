@@ -237,6 +237,7 @@ final class Panel: NSPanel, NSTextViewDelegate {
     private func startMeter() {
         guard link == nil else { return }
         link = card.displayLink(target: self, selector: #selector(tick))
+        link?.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
         link?.add(to: .main, forMode: .common)
     }
 
