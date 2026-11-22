@@ -3,6 +3,7 @@ import AVFoundation
 import Core
 import CoreAudio
 import FluidAudio
+import os
 import Synchronization
 
 /// Microphone + on-device transcription (Parakeet Unified, streaming). Reports back only through `send`,
@@ -126,6 +127,7 @@ final class Speech {
     /// Mid-stream is fine: FluidAudio then rescores only the audio from here on.
     private func bias(_ words: [String]) async {
         guard let manager, let ctc, boosted || !words.isEmpty, !Task.isCancelled else { return }
+        log.notice("boosting: \(words.joined(separator: ", "), privacy: .public)")
         let vocabulary = CustomVocabularyContext(terms: words.map { CustomVocabularyTerm(text: $0) })
         do {
             try await manager.configureVocabularyBoosting(vocabulary: vocabulary, ctcModels: ctc, thresholds: Self.thresholds)
@@ -178,6 +180,9 @@ final class Speech {
         engine.prepare()
     }
 }
+
+/// Local system log; `log show --predicate 'subsystem == "app.sendpoint"'` reads it.
+private let log = Logger(subsystem: "app.sendpoint", category: "voice")
 
 /// The input device chosen in System Settings › Sound right now.
 private func defaultInputDevice() -> AudioDeviceID {
